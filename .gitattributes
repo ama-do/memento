@@ -1,0 +1,11 @@
+# Normalize line endings to LF on commit, check out as LF everywhere.
+* text=auto eol=lf
+
+# Treat binary files as binary (no line-ending or diff processing).
+*.sqlite binary
+*.db     binary
+*.zip    binary
+*.gz     binary
+*.tar    binary
+*.png    binary
+*.jpg    binary

@@ -1,0 +1,8 @@
+.{
+    .name = .memento,
+    .fingerprint = 0x9679fe6ef6736b23,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{},
+    .paths = .{""},
+}

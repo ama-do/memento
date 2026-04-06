@@ -1,0 +1,79 @@
+name: Release
+
+# Runs when a version tag is pushed: git tag v0.2.0 && git push --tags
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create a GitHub Release
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux ────────────────────────────────────────────────────────────
+          - target: x86_64-linux-gnu
+            runner: ubuntu-latest
+            archive: mm-linux-x86_64.tar.gz
+
+          - target: aarch64-linux-gnu
+            runner: ubuntu-24.04-arm
+            archive: mm-linux-aarch64.tar.gz
+
+          # ── macOS ────────────────────────────────────────────────────────────
+          - target: x86_64-macos
+            runner: macos-13        # last Intel runner
+            archive: mm-macos-x86_64.tar.gz
+
+          - target: aarch64-macos
+            runner: macos-latest    # Apple Silicon
+            archive: mm-macos-aarch64.tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: master   # tracks 0.16.0-dev; pin to a hash for reproducibility
+
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.target }}
+
+      - name: Package
+        run: |
+          mkdir dist
+          cp zig-out/bin/mm dist/mm
+          cp README.md dist/
+          tar -czf ${{ matrix.archive }} -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.tar.gz
+          generate_release_notes: true

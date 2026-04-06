@@ -1,0 +1,7 @@
+# Zig build artifacts
+.zig-cache/
+zig-out/
+
+# SQLite databases (dev/test databases, never production data)
+*.sqlite
+*.db
