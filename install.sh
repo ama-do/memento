@@ -41,7 +41,7 @@ case "$ARCH" in
         ;;
 esac
 
-ARCHIVE="mm-${OS_TAG}-${ARCH_TAG}.tar.gz"
+ARCHIVE="memento-${OS_TAG}-${ARCH_TAG}.tar.gz"
 
 # ── Resolve latest release tag ────────────────────────────────────────────────
 
@@ -81,8 +81,8 @@ tar -xzf "$TMP/$ARCHIVE" -C "$TMP"
 # ── Install binary ────────────────────────────────────────────────────────────
 
 mkdir -p "$BIN_DIR"
-install -m 755 "$TMP/mm" "$BIN_DIR/mm"
-echo "Installed mm to $BIN_DIR/mm"
+install -m 755 "$TMP/memento" "$BIN_DIR/memento"
+echo "Installed memento to $BIN_DIR/memento"
 
 # ── Check PATH ────────────────────────────────────────────────────────────────
 
@@ -95,13 +95,14 @@ case ":$PATH:" in
         echo ""
         echo "    export PATH=\"\$PATH:$BIN_DIR\""
         echo ""
+        echo ""
         ;;
 esac
 
 # ── Install shell wrapper ─────────────────────────────────────────────────────
 
-echo "Installing shell wrapper ..."
-"$BIN_DIR/mm" --init
+echo "Installing shell wrapper (function name: mm) ..."
+"$BIN_DIR/memento" --init mm
 
 echo ""
 echo "Done. Restart your shell or source your shell config, then run: mm --help"

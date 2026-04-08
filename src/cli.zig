@@ -71,6 +71,9 @@ pub const HistoryArgs = struct {
 };
 
 pub const InitArgs = struct {
+    /// Name of the shell function to install. Defaults to "mm".
+    /// Override with: memento --init myalias
+    fn_name: []const u8 = "mm",
     shell: ?[]const u8 = null,
     config_file: ?[]const u8 = null,
     force: bool = false,
@@ -322,6 +325,8 @@ fn parseInit(args: []const []const u8) InitArgs {
         } else if (eql(arg, "--config-file")) {
             i += 1;
             if (i < args.len) result.config_file = args[i];
+        } else if (!std.mem.startsWith(u8, arg, "-")) {
+            result.fn_name = arg;
         }
     }
     return result;

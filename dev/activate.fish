@@ -10,11 +10,11 @@
 #   source ~/.config/fish/config.fish
 
 set -l _mm_dev_root (realpath (dirname (status filename))/..)
-set -l _mm_dev_bin  $_mm_dev_root/zig-out/bin/mm
+set -l _mm_dev_bin  $_mm_dev_root/zig-out/bin/memento
 set -l _mm_dev_db   $_mm_dev_root/.zig-cache/mm-dev.sqlite
 
 if not test -f $_mm_dev_bin
-    echo "mm dev: binary not found. Run 'zig build' first." >&2
+    echo "memento dev: binary not found. Run 'zig build' first." >&2
     return 1
 end
 

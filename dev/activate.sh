@@ -14,11 +14,11 @@
 # Resolve the project root regardless of where the shell is when this is sourced.
 # BASH_SOURCE is set by bash; $0 is used as a fallback for other POSIX shells.
 _MM_DEV_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
-_MM_DEV_BIN="$_MM_DEV_ROOT/zig-out/bin/mm"
+_MM_DEV_BIN="$_MM_DEV_ROOT/zig-out/bin/memento"
 _MM_DEV_DB="$_MM_DEV_ROOT/.zig-cache/mm-dev.sqlite"
 
 if [ ! -f "$_MM_DEV_BIN" ]; then
-    echo "mm dev: binary not found. Run 'zig build' first." >&2
+    echo "memento dev: binary not found. Run 'zig build' first." >&2
     return 1
 fi
 

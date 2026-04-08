@@ -3,7 +3,13 @@
 pub const sqlite3 = opaque {};
 pub const sqlite3_stmt = opaque {};
 
-pub const sqlite3_destructor_type = ?*const fn (?*anyopaque) callconv(.c) void;
+/// SQLite destructor callback type.  `align(1)` allows the sentinel value
+/// SQLITE_TRANSIENT = (void *)(-1) to be expressed without triggering Zig's
+/// pointer-alignment checks on targets that require >1-byte function alignment
+/// (e.g. aarch64 where instructions are 4-byte aligned).  The pointer is never
+/// actually dereferenced for the sentinel; real destructors are always properly
+/// aligned at the C call site.
+pub const sqlite3_destructor_type = ?*align(1) const fn (?*anyopaque) callconv(.c) void;
 
 pub const SQLITE_OK = @as(c_int, 0);
 pub const SQLITE_ROW = @as(c_int, 100);

@@ -6,9 +6,32 @@
 /// stdout: ONLY the eval-able command string (execute path).
 /// stderr: ALL human-readable output (lists, errors, confirmations).
 const std = @import("std");
+const builtin = @import("builtin");
 const cli = @import("cli.zig");
 const core = @import("core/mod.zig");
-const tui = @import("tui/mod.zig");
+
+/// On non-POSIX targets (Windows) the TUI is not available.
+/// A stub namespace provides the same function signatures and always returns null.
+const tui = if (builtin.os.tag == .windows) struct {
+    pub fn openCommands(
+        io: std.Io,
+        gpa: std.mem.Allocator,
+        db: *core.Db,
+        env: *const std.process.Environ.Map,
+    ) !?[]u8 {
+        _ = io; _ = gpa; _ = db; _ = env;
+        return null;
+    }
+    pub fn openHistory(
+        io: std.Io,
+        gpa: std.mem.Allocator,
+        db: *core.Db,
+        env: *const std.process.Environ.Map,
+    ) !?[]u8 {
+        _ = io; _ = gpa; _ = db; _ = env;
+        return null;
+    }
+} else @import("tui/mod.zig");
 
 pub fn main(init: std.process.Init) u8 {
     run(init) catch |err| switch (err) {
@@ -86,11 +109,20 @@ fn resolveDbPath(gpa: std.mem.Allocator, env: *const std.process.Environ.Map) ![
     if (comptime build_options.enable_mm_db_override) {
         if (env.get("MM_DB")) |p| return gpa.dupe(u8, p);
     }
-    if (env.get("XDG_DATA_HOME")) |xdg| {
-        return std.fs.path.join(gpa, &.{ xdg, "memento", "db.sqlite" });
-    }
-    if (env.get("HOME")) |home| {
-        return std.fs.path.join(gpa, &.{ home, ".local", "share", "memento", "db.sqlite" });
+    if (builtin.os.tag == .windows) {
+        if (env.get("APPDATA")) |appdata| {
+            return std.fs.path.join(gpa, &.{ appdata, "memento", "db.sqlite" });
+        }
+        if (env.get("USERPROFILE")) |profile| {
+            return std.fs.path.join(gpa, &.{ profile, "AppData", "Roaming", "memento", "db.sqlite" });
+        }
+    } else {
+        if (env.get("XDG_DATA_HOME")) |xdg| {
+            return std.fs.path.join(gpa, &.{ xdg, "memento", "db.sqlite" });
+        }
+        if (env.get("HOME")) |home| {
+            return std.fs.path.join(gpa, &.{ home, ".local", "share", "memento", "db.sqlite" });
+        }
     }
     return gpa.dupe(u8, "mm.db.sqlite");
 }
@@ -328,6 +360,19 @@ fn handleEdit(
     }
 }
 
+/// Return a temp file path unique to this process.  Caller owns the result.
+fn tmpFilePath(gpa: std.mem.Allocator, env: *const std.process.Environ.Map, stem: []const u8) ![]u8 {
+    const pid: u32 = if (builtin.os.tag == .windows)
+        std.os.windows.GetCurrentProcessId()
+    else
+        @intCast(std.c.getpid());
+    const tmp_dir = if (builtin.os.tag == .windows)
+        env.get("TEMP") orelse env.get("TMP") orelse "C:\\Windows\\Temp"
+    else
+        "/tmp";
+    return std.fmt.allocPrint(gpa, "{s}" ++ std.fs.path.sep_str ++ "mm_{s}_{d}", .{ tmp_dir, stem, pid });
+}
+
 /// Open $EDITOR (fallback: vi) with the command in a temp file, then save if changed.
 fn spawnEditorEdit(
     io: std.Io,
@@ -339,7 +384,7 @@ fn spawnEditorEdit(
 ) !void {
     const editor = env.get("EDITOR") orelse "vi";
 
-    const tmp_path = try std.fmt.allocPrint(gpa, "/tmp/mm_edit_{d}", .{std.c.getpid()});
+    const tmp_path = try tmpFilePath(gpa, env, "edit");
     defer gpa.free(tmp_path);
 
     // Write current command to temp file.
@@ -473,7 +518,9 @@ fn handleHistory(
     const sh = core.shell.detectShell(env) orelse {
         return printErr(io, "error: Could not detect current shell\n", .{});
     };
-    const home = env.get("HOME") orelse return printErr(io, "error: HOME not set\n", .{});
+    const home = env.get("HOME")
+        orelse env.get("USERPROFILE") // Windows fallback
+        orelse return printErr(io, "error: HOME not set\n", .{});
 
     var hist = try core.history.read(io, gpa, sh, env, home);
     defer hist.deinit();
@@ -505,7 +552,7 @@ fn handleHistory(
         defer if (edited_buf) |b| gpa.free(b);
         const final_cmd: []const u8 = if (h.edit or h.as_template) blk: {
             const editor = env.get("EDITOR") orelse "vi";
-            const tmp_path = try std.fmt.allocPrint(gpa, "/tmp/mm_hist_{d}", .{std.c.getpid()});
+            const tmp_path = try tmpFilePath(gpa, env, "hist");
             defer gpa.free(tmp_path);
             {
                 const f = try std.Io.Dir.createFileAbsolute(io, tmp_path, .{});
@@ -609,6 +656,7 @@ fn handleInit(
         null;
 
     const opts = core.init_mod.Options{
+        .fn_name = i.fn_name,
         .shell = sh,
         .config_file = i.config_file,
         .force = i.force,
@@ -647,15 +695,15 @@ fn printHelp(io: std.Io) void {
     var buf: [2048]u8 = undefined;
     var w = std.Io.File.stderr().writer(io, &buf);
     w.interface.print(
-        \\mm — memento command bookmarks
+        \\memento — command bookmarks
         \\
-        \\  mm <label>              Execute saved command
+        \\  mm <label>              Execute saved command  (via shell function)
         \\  mm -a <label> <cmd>     Add command  (--add)
         \\  mm -l [term]            List commands  (--list)
         \\  mm -e <label>           Edit command  (--edit)
         \\  mm -d <label>           Delete command  (--delete)
         \\  mm -H [term]            Browse shell history  (--history)
-        \\  mm --init               Install shell wrapper  (-i)
+        \\  memento --init [name]   Install shell wrapper  (-i)  default name: mm
         \\
         \\  --description <text>    Set a description for the command  (-a, -e)
         \\  --universal             Mark command as available in all shells
@@ -670,7 +718,7 @@ fn printHelp(io: std.Io) void {
 fn printVersion(io: std.Io) void {
     var buf: [64]u8 = undefined;
     var w = std.Io.File.stderr().writer(io, &buf);
-    w.interface.print("mm 0.1.0\n", .{}) catch {};
+    w.interface.print("memento 0.1.0\n", .{}) catch {};
     w.flush() catch {};
 }
 

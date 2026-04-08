@@ -33,7 +33,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addOptions("build_options", build_opts);
 
     const exe = b.addExecutable(.{
-        .name = "mm",
+        .name = "memento",
         .root_module = exe_mod,
     });
     b.installArtifact(exe);
@@ -80,7 +80,7 @@ pub fn build(b: *std.Build) void {
 
     // Build options: bake the installed binary path into every test module.
     const opts = b.addOptions();
-    opts.addOption([]const u8, "mm_exe", b.getInstallPath(.bin, "mm"));
+    opts.addOption([]const u8, "mm_exe", b.getInstallPath(.bin, "memento"));
 
     const feature_tests = [_][]const u8{
         "tests/01_setup_test.zig",
@@ -97,6 +97,25 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path(test_file),
             .target = target,
             .optimize = optimize,
+        });
+        mod.addOptions("build_options", opts);
+        mod.addImport("helper", helper_mod);
+
+        const t = b.addTest(.{ .root_module = mod });
+        t.step.dependOn(b.getInstallStep());
+
+        const run_t = b.addRunArtifact(t);
+        test_step.dependOn(&run_t.step);
+    }
+
+    // TUI tests require libc for PTY operations (fork, execve, grantpt, etc.)
+    // PTY APIs are POSIX-only; skip on Windows targets.
+    if (target.result.os.tag != .windows) {
+        const mod = b.createModule(.{
+            .root_source_file = b.path("tests/08_tui_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
         });
         mod.addOptions("build_options", opts);
         mod.addImport("helper", helper_mod);

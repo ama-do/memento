@@ -1,5 +1,6 @@
 /// Shell detection, wrapper text generation, and history file paths.
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const Shell = enum {
     bash,
@@ -26,9 +27,14 @@ pub const Shell = enum {
     }
 };
 
-/// Detect the current shell from the SHELL environment variable.
-/// Returns null if SHELL is unset or unrecognised.
+/// Detect the current shell from the environment.
+/// On Windows, SHELL is not set; PowerShell is detected via PSModulePath.
+/// Returns null if no known shell is detected.
 pub fn detectShell(environ_map: *const std.process.Environ.Map) ?Shell {
+    if (builtin.os.tag == .windows) {
+        if (environ_map.get("PSModulePath") != null) return .powershell;
+        return null;
+    }
     const shell_var = environ_map.get("SHELL") orelse return null;
     const basename = std.fs.path.basename(shell_var);
     return Shell.fromStr(basename);
@@ -46,37 +52,45 @@ pub fn isCompatible(cmd_scope: []const u8, current_shell: Shell) bool {
 pub const MARKER_BEGIN = "# mm-memento-begin";
 pub const MARKER_END = "# mm-memento-end";
 
-/// Returns the complete wrapper snippet (including markers) to append to a
-/// shell rc file. Returned string is a comptime constant — do not free.
-pub fn wrapperSnippet(shell: Shell) []const u8 {
+/// Generate the complete wrapper snippet for `shell` installing a function
+/// named `fn_name` that delegates to the `memento` binary.
+/// For bash/zsh/PowerShell the snippet includes marker comments so it can be
+/// detected and replaced without shell-specific logic.
+/// Caller owns the returned string.
+pub fn wrapperSnippet(gpa: std.mem.Allocator, shell: Shell, fn_name: []const u8) ![]u8 {
     return switch (shell) {
-        .bash, .zsh =>
+        .bash, .zsh => std.fmt.allocPrint(gpa,
             \\
             \\# mm-memento-begin
-            \\function mm() {
-            \\    eval "$(command mm "$@")"
-            \\}
+            \\function {s}() {{
+            \\    eval "$(command memento "$@")"
+            \\}}
             \\# mm-memento-end
             \\
-        ,
-        .powershell =>
+        , .{fn_name}),
+        .powershell => std.fmt.allocPrint(gpa,
             "\n" ++ MARKER_BEGIN ++ "\n" ++
-                "function mm {\n" ++
-                "    Invoke-Expression (& (Get-Command mm -CommandType Application).Source @args)\n" ++
-                "}\n" ++
-                MARKER_END ++ "\n",
+            "function {s} {{\n" ++
+            "    Invoke-Expression (& (Get-Command memento -CommandType Application).Source @args)\n" ++
+            "}}\n" ++
+            MARKER_END ++ "\n",
+            .{fn_name},
+        ),
         // Fish uses a dedicated functions file; no markers needed.
-        .fish =>
-            \\function mm
-            \\    eval (command mm $argv)
+        .fish => std.fmt.allocPrint(gpa,
+            \\function {s}
+            \\    eval (command memento $argv)
             \\end
             \\
-        ,
+        , .{fn_name}),
     };
 }
 
-/// Path to the wrapper file for fish (relative to HOME).
-pub const fish_wrapper_rel = ".config/fish/functions/mm.fish";
+/// Returns the absolute path to the fish wrapper file for the given function name.
+/// Caller owns the returned string.
+pub fn fishWrapperPath(gpa: std.mem.Allocator, home: []const u8, fn_name: []const u8) ![]u8 {
+    return std.fmt.allocPrint(gpa, "{s}/.config/fish/functions/{s}.fish", .{ home, fn_name });
+}
 
 /// Returns the rc file path relative to HOME for bash/zsh/powershell.
 pub fn rcFileRel(shell: Shell) []const u8 {

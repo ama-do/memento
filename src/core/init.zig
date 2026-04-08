@@ -6,6 +6,8 @@ const Shell = shell_mod.Shell;
 pub const InitResult = enum { installed, already_installed, reinstalled };
 
 pub const Options = struct {
+    /// Name of the shell function to install (e.g. "mm", "memento", "mymemo").
+    fn_name: []const u8,
     shell: ?Shell,
     config_file: ?[]const u8,
     force: bool,
@@ -25,15 +27,17 @@ pub fn run(
         return error.ShellNotDetected;
     };
 
-    const home = environ_map.get("HOME") orelse return error.HomeNotSet;
+    const home = environ_map.get("HOME")
+        orelse environ_map.get("USERPROFILE") // Windows fallback
+        orelse return error.HomeNotSet;
 
     if (opts.verify) {
-        try runVerify(io, gpa, sh, home);
+        try runVerify(io, gpa, sh, home, opts.fn_name);
         return .already_installed;
     }
 
     if (opts.explain) {
-        runExplain(io, sh);
+        runExplain(io, gpa, sh, opts.fn_name);
         return .already_installed;
     }
 
@@ -55,7 +59,7 @@ fn installFish(
     const wrapper_path = if (opts.config_file) |cf|
         try gpa.dupe(u8, cf)
     else
-        try std.fs.path.join(gpa, &.{ home, shell_mod.fish_wrapper_rel });
+        try shell_mod.fishWrapperPath(gpa, home, opts.fn_name);
     defer gpa.free(wrapper_path);
 
     const cwd = std.Io.Dir.cwd();
@@ -71,7 +75,8 @@ fn installFish(
         else => return e,
     };
 
-    const content = shell_mod.wrapperSnippet(.fish);
+    const content = try shell_mod.wrapperSnippet(gpa, .fish, opts.fn_name);
+    defer gpa.free(content);
     try cwd.writeFile(io, .{ .sub_path = wrapper_path, .data = content });
 
     return if (exists) .reinstalled else .installed;
@@ -107,11 +112,11 @@ fn installRcShell(
     if (has_marker) {
         new_content = try removeMarkerBlock(gpa, current);
         defer gpa.free(new_content);
-        const appended = try appendSnippet(gpa, new_content, sh);
+        const appended = try appendSnippet(gpa, new_content, sh, opts.fn_name);
         defer gpa.free(appended);
         try cwd.writeFile(io, .{ .sub_path = rc_path, .data = appended });
     } else {
-        const appended = try appendSnippet(gpa, current, sh);
+        const appended = try appendSnippet(gpa, current, sh, opts.fn_name);
         defer gpa.free(appended);
         try cwd.writeFile(io, .{ .sub_path = rc_path, .data = appended });
     }
@@ -119,8 +124,9 @@ fn installRcShell(
     return if (has_marker) .reinstalled else .installed;
 }
 
-fn appendSnippet(gpa: std.mem.Allocator, base: []const u8, sh: Shell) ![]u8 {
-    const snippet = shell_mod.wrapperSnippet(sh);
+fn appendSnippet(gpa: std.mem.Allocator, base: []const u8, sh: Shell, fn_name: []const u8) ![]u8 {
+    const snippet = try shell_mod.wrapperSnippet(gpa, sh, fn_name);
+    defer gpa.free(snippet);
     var buf = std.ArrayList(u8).empty;
     errdefer buf.deinit(gpa);
     try buf.appendSlice(gpa, base);
@@ -153,11 +159,11 @@ fn removeMarkerBlock(gpa: std.mem.Allocator, content: []const u8) ![]u8 {
 
 // ── Verify / Explain ──────────────────────────────────────────────────────────
 
-fn runVerify(io: std.Io, gpa: std.mem.Allocator, sh: Shell, home: []const u8) !void {
+fn runVerify(io: std.Io, gpa: std.mem.Allocator, sh: Shell, home: []const u8, fn_name: []const u8) !void {
     const cwd = std.Io.Dir.cwd();
 
     if (sh == .fish) {
-        const wrapper_path = try std.fs.path.join(gpa, &.{ home, shell_mod.fish_wrapper_rel });
+        const wrapper_path = try shell_mod.fishWrapperPath(gpa, home, fn_name);
         defer gpa.free(wrapper_path);
         const exists = fileExists(io, cwd, wrapper_path);
         var buf: [256]u8 = undefined;
@@ -167,7 +173,7 @@ fn runVerify(io: std.Io, gpa: std.mem.Allocator, sh: Shell, home: []const u8) !v
             try w.interface.print("File: {s}\n", .{wrapper_path});
         } else {
             try w.interface.print("Shell wrapper not found at: {s}\n", .{wrapper_path});
-            try w.interface.print("Run: mm --init\n", .{});
+            try w.interface.print("Run: memento --init\n", .{});
         }
         try w.flush();
         return;
@@ -200,17 +206,19 @@ fn runVerify(io: std.Io, gpa: std.mem.Allocator, sh: Shell, home: []const u8) !v
     try w.flush();
 }
 
-fn runExplain(io: std.Io, sh: Shell) void {
+fn runExplain(io: std.Io, gpa: std.mem.Allocator, sh: Shell, fn_name: []const u8) void {
+    const snippet = shell_mod.wrapperSnippet(gpa, sh, fn_name) catch return;
+    defer gpa.free(snippet);
     var buf: [1024]u8 = undefined;
     var w = std.Io.File.stderr().writer(io, &buf);
     w.interface.print(
-        \\mm uses a shell wrapper because a subprocess cannot modify its parent shell.
-        \\The wrapper captures mm's stdout and passes it to eval, allowing cd, export,
+        \\memento uses a shell wrapper because a subprocess cannot modify its parent shell.
+        \\The wrapper captures memento's stdout and passes it to eval, allowing cd, export,
         \\and other stateful commands to work correctly.
         \\
-        \\Example wrapper for {s}:
+        \\Example wrapper for {s} (function name: {s}):
         \\{s}
-    , .{ sh.toStr(), shell_mod.wrapperSnippet(sh) }) catch {};
+    , .{ sh.toStr(), fn_name, snippet }) catch {};
     w.flush() catch {};
 }
 

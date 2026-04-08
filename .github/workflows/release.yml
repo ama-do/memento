@@ -20,20 +20,35 @@ jobs:
           # ── Linux ────────────────────────────────────────────────────────────
           - target: x86_64-linux-gnu
             runner: ubuntu-latest
-            archive: mm-linux-x86_64.tar.gz
+            archive: memento-linux-x86_64.tar.gz
+            exe: memento
+            pack: tar
 
           - target: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
-            archive: mm-linux-aarch64.tar.gz
+            archive: memento-linux-aarch64.tar.gz
+            exe: memento
+            pack: tar
 
           # ── macOS ────────────────────────────────────────────────────────────
           - target: x86_64-macos
             runner: macos-13        # last Intel runner
-            archive: mm-macos-x86_64.tar.gz
+            archive: memento-macos-x86_64.tar.gz
+            exe: memento
+            pack: tar
 
           - target: aarch64-macos
             runner: macos-latest    # Apple Silicon
-            archive: mm-macos-aarch64.tar.gz
+            archive: memento-macos-aarch64.tar.gz
+            exe: memento
+            pack: tar
+
+          # ── Windows ──────────────────────────────────────────────────────────
+          - target: x86_64-windows
+            runner: windows-latest
+            archive: memento-windows-x86_64.zip
+            exe: memento.exe
+            pack: zip
 
     steps:
       - uses: actions/checkout@v4
@@ -46,12 +61,22 @@ jobs:
       - name: Build
         run: zig build -Doptimize=ReleaseSafe -Dtarget=${{ matrix.target }}
 
-      - name: Package
+      - name: Package (tar)
+        if: matrix.pack == 'tar'
         run: |
           mkdir dist
-          cp zig-out/bin/mm dist/mm
+          cp zig-out/bin/${{ matrix.exe }} dist/${{ matrix.exe }}
           cp README.md dist/
           tar -czf ${{ matrix.archive }} -C dist .
+
+      - name: Package (zip)
+        if: matrix.pack == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist
+          Copy-Item zig-out/bin/${{ matrix.exe }} dist/${{ matrix.exe }}
+          Copy-Item README.md dist/
+          Compress-Archive -Path dist/* -DestinationPath ${{ matrix.archive }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -75,5 +100,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.tar.gz
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
           generate_release_notes: true

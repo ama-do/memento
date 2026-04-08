@@ -34,7 +34,7 @@ test "mm --init creates the fish wrapper function file" {
     defer gpa.free(content);
     try std.testing.expect(std.mem.containsAtLeast(u8, content, 1, "function mm"));
     try std.testing.expect(std.mem.containsAtLeast(u8, content, 1, "eval"));
-    try std.testing.expect(std.mem.containsAtLeast(u8, content, 1, "command mm"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, content, 1, "command memento"));
 }
 
 test "mm -i short flag works the same as --init" {

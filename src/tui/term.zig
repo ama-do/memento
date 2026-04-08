@@ -4,6 +4,7 @@
 /// flushing it to the terminal in a single write(2) call to avoid flicker.
 /// Raw mode and key reading use the C termios API via libc (already linked).
 const std = @import("std");
+const builtin = @import("builtin");
 
 // ── C bindings ────────────────────────────────────────────────────────────────
 
@@ -12,34 +13,69 @@ extern fn tcsetattr(fd: c_int, action: c_int, t: *const Termios) c_int;
 extern fn ioctl(fd: c_int, req: c_ulong, ...) c_int;
 extern fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
 
-const Termios = extern struct {
+// ── Platform-specific termios layout ─────────────────────────────────────────
+//
+// macOS (Darwin): tcflag_t = unsigned long (8 bytes on 64-bit), NCCS = 20,
+//   no c_line field.  Speed fields are also unsigned long.
+//
+// Linux:          tcflag_t = unsigned int  (4 bytes), NCCS = 19 (kernel ABI),
+//   has c_line field.  Speed fields are unsigned int.
+
+const is_darwin = builtin.os.tag.isDarwin();
+
+/// The type of each flag field in the termios struct (platform-specific).
+const TermiosFlag = if (is_darwin) c_ulong else c_uint;
+
+const Termios = if (is_darwin) extern struct {
+    c_iflag: c_ulong,
+    c_oflag: c_ulong,
+    c_cflag: c_ulong,
+    c_lflag: c_ulong,
+    c_cc: [20]u8, // NCCS = 20 on macOS
+    // extern struct applies C ABI alignment: 4 bytes of implicit padding here
+    // before the 8-byte-aligned speed fields.
+    c_ispeed: c_ulong,
+    c_ospeed: c_ulong,
+} else extern struct {
     c_iflag: c_uint,
     c_oflag: c_uint,
     c_cflag: c_uint,
     c_lflag: c_uint,
     c_line: u8,
-    c_cc: [19]u8, // NCCS = 19 on Linux
+    c_cc: [19]u8, // NCCS = 19 on Linux (kernel ABI)
     c_ispeed: c_uint,
     c_ospeed: c_uint,
 };
 
-const VTIME: usize = 5;
-const VMIN: usize = 6;
-const TCSANOW: c_int = 0;
+// ── Terminal control constants ────────────────────────────────────────────────
+
+const VTIME: usize = if (is_darwin) 17 else 5;
+const VMIN: usize  = if (is_darwin) 16 else 6;
+const TCSANOW:  c_int = 0;
 const TCSAFLUSH: c_int = 2;
-const ECHO: c_uint = 0x0008;
-const ECHONL: c_uint = 0x0040;
-const ICANON: c_uint = 0x0002;
-const ISIG: c_uint = 0x0001;
-const IEXTEN: c_uint = 0x8000;
-const IXON: c_uint = 0x0400;
-const ICRNL: c_uint = 0x0100;
-const BRKINT: c_uint = 0x0002;
-const INPCK: c_uint = 0x0010;
-const ISTRIP: c_uint = 0x0020;
-const OPOST: c_uint = 0x0001;
-const CS8: c_uint = 0x30;
-const TIOCGWINSZ: c_ulong = 0x5413;
+
+// Input flags (c_iflag)
+const IXON:   TermiosFlag = if (is_darwin) 0x0200 else 0x0400;
+const ICRNL:  TermiosFlag = 0x0100; // same on both
+const BRKINT: TermiosFlag = 0x0002; // same on both
+const INPCK:  TermiosFlag = 0x0010; // same on both
+const ISTRIP: TermiosFlag = 0x0020; // same on both
+
+// Output flags (c_oflag)
+const OPOST: TermiosFlag = 0x0001; // same on both
+
+// Control flags (c_cflag)
+const CS8: TermiosFlag = if (is_darwin) 0x0300 else 0x0030;
+
+// Local flags (c_lflag)
+const ECHO:   TermiosFlag = 0x0008; // same on both
+const ECHONL: TermiosFlag = if (is_darwin) 0x0010 else 0x0040;
+const ICANON: TermiosFlag = if (is_darwin) 0x0100 else 0x0002;
+const ISIG:   TermiosFlag = if (is_darwin) 0x0080 else 0x0001;
+const IEXTEN: TermiosFlag = if (is_darwin) 0x0400 else 0x8000;
+
+// ioctl request codes
+const TIOCGWINSZ: c_ulong = if (is_darwin) 0x40087468 else 0x5413;
 
 const WinSize = extern struct {
     ws_row: u16,
