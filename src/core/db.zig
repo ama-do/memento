@@ -239,41 +239,61 @@ pub const Db = struct {
             results.deinit(self.gpa);
         }
 
-        const stmt = try self.prepare(
-            "SELECT id,label,command,scope,description,is_template,placeholders FROM commands ORDER BY label ASC",
-        );
+        // Build a parameterized query from the filter so SQLite does the
+        // filtering rather than loading every row into memory.
+        var sql = std.ArrayList(u8).empty;
+        defer sql.deinit(self.gpa);
+        try sql.appendSlice(self.gpa,
+            "SELECT id,label,command,scope,description,is_template,placeholders FROM commands WHERE 1=1");
+
+        if (!filter.show_all) {
+            if (filter.scope != null) {
+                try sql.appendSlice(self.gpa, " AND scope=?");
+            } else if (filter.current_shell != null) {
+                try sql.appendSlice(self.gpa, " AND (scope='universal' OR scope=?)");
+            }
+        }
+        if (filter.templates_only) try sql.appendSlice(self.gpa, " AND is_template=1");
+        if (filter.search) |term| {
+            if (term.len > 0) try sql.appendSlice(self.gpa, " AND (label LIKE ? OR command LIKE ?)");
+        }
+        try sql.appendSlice(self.gpa, " ORDER BY label ASC");
+        try sql.append(self.gpa, 0); // null-terminate for SQLite
+
+        const stmt = try self.prepare(@as([*:0]const u8, @ptrCast(sql.items.ptr)));
         defer _ = c.sqlite3_finalize(stmt);
+
+        // Bind parameters in the same order the clauses were appended above.
+        var param_idx: c_int = 1;
+        if (!filter.show_all) {
+            if (filter.scope) |s| {
+                try bindText(stmt, param_idx, s.toStr());
+                param_idx += 1;
+            } else if (filter.current_shell) |sh| {
+                try bindText(stmt, param_idx, sh.toStr());
+                param_idx += 1;
+            }
+        }
+        if (filter.search) |term| {
+            if (term.len > 0) {
+                // LIKE with %…% is case-insensitive for ASCII, covering all
+                // realistic label/command text.
+                const like_pattern = try std.fmt.allocPrint(self.gpa, "%{s}%", .{term});
+                defer self.gpa.free(like_pattern);
+                try bindText(stmt, param_idx, like_pattern);
+                param_idx += 1;
+                try bindText(stmt, param_idx, like_pattern);
+                param_idx += 1;
+            }
+        }
 
         while (c.sqlite3_step(stmt) == c.SQLITE_ROW) {
             const cmd = try self.rowToCommand(stmt);
             errdefer cmd.deinit(self.gpa);
-
-            if (!matchesFilter(cmd, filter)) {
-                cmd.deinit(self.gpa);
-                continue;
-            }
             try results.append(self.gpa, cmd);
         }
 
         return results.toOwnedSlice(self.gpa);
-    }
-
-    fn matchesFilter(cmd: Command, filter: ListFilter) bool {
-        if (!filter.show_all) {
-            if (filter.scope) |s| {
-                if (cmd.scope != s) return false;
-            } else if (filter.current_shell) |sh| {
-                if (cmd.scope != .universal and cmd.scope != sh) return false;
-            }
-        }
-        if (filter.templates_only and !cmd.is_template) return false;
-        if (filter.search) |term| {
-            if (term.len == 0) return true;
-            const in_label = std.mem.containsAtLeast(u8, cmd.label, 1, term);
-            const in_cmd = std.mem.containsAtLeast(u8, cmd.command, 1, term);
-            if (!in_label and !in_cmd) return false;
-        }
-        return true;
     }
 
     pub const UpdateFields = struct {

@@ -67,7 +67,8 @@ fn emptyHistory(gpa: std.mem.Allocator) !History {
 }
 
 /// Parse a plain one-command-per-line history file (bash/zsh/powershell).
-fn parsePlain(gpa: std.mem.Allocator, buf: []u8) !History {
+/// Takes ownership of `buf`; call History.deinit to release.
+pub fn parsePlain(gpa: std.mem.Allocator, buf: []u8) !History {
     var entries = std.ArrayList(Entry).empty;
     errdefer entries.deinit(gpa);
 
@@ -90,7 +91,8 @@ fn parsePlain(gpa: std.mem.Allocator, buf: []u8) !History {
 /// Parse fish's YAML-ish history format:
 ///   - cmd: <command>
 ///     when: <timestamp>
-fn parseFish(gpa: std.mem.Allocator, buf: []u8) !History {
+/// Takes ownership of `buf`; call History.deinit to release.
+pub fn parseFish(gpa: std.mem.Allocator, buf: []u8) !History {
     var entries = std.ArrayList(Entry).empty;
     errdefer entries.deinit(gpa);
 

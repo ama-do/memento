@@ -145,11 +145,11 @@ pub fn parse(gpa: std.mem.Allocator, raw: []const []const u8) !ParsedArgs {
     // ── 3. Dispatch to mode-specific parsers ─────────────────────────────────
     return switch (mode) {
         .add => .{ .add = try parseAdd(gpa, args) },
-        .list => .{ .list = parseList(args) },
+        .list => .{ .list = try parseList(args) },
         .edit => .{ .edit = try parseEdit(gpa, args) },
         .delete => .{ .delete = try parseDelete(gpa, args) },
         .history => .{ .history = try parseHistory(gpa, args) },
-        .init => .{ .init = parseInit(args) },
+        .init => .{ .init = try parseInit(args) },
         .help => .help,
         .version => .version,
         .execute => try parseExecute(gpa, args),
@@ -193,7 +193,7 @@ fn parseAdd(gpa: std.mem.Allocator, args: []const []const u8) !AddArgs {
     return result;
 }
 
-fn parseList(args: []const []const u8) ListArgs {
+fn parseList(args: []const []const u8) !ListArgs {
     var result: ListArgs = .{};
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -206,7 +206,8 @@ fn parseList(args: []const []const u8) ListArgs {
             result.no_truncate = true;
         } else if (eql(arg, "--scope")) {
             i += 1;
-            if (i < args.len) result.scope = args[i];
+            if (i >= args.len) return error.MissingArgValue;
+            result.scope = args[i];
         } else if (!std.mem.startsWith(u8, arg, "-")) {
             result.search = arg;
         }
@@ -308,7 +309,7 @@ fn parseHistory(gpa: std.mem.Allocator, args: []const []const u8) !HistoryArgs {
     return result;
 }
 
-fn parseInit(args: []const []const u8) InitArgs {
+fn parseInit(args: []const []const u8) !InitArgs {
     var result: InitArgs = .{};
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -321,10 +322,12 @@ fn parseInit(args: []const []const u8) InitArgs {
             result.explain = true;
         } else if (eql(arg, "--shell")) {
             i += 1;
-            if (i < args.len) result.shell = args[i];
+            if (i >= args.len) return error.MissingArgValue;
+            result.shell = args[i];
         } else if (eql(arg, "--config-file")) {
             i += 1;
-            if (i < args.len) result.config_file = args[i];
+            if (i >= args.len) return error.MissingArgValue;
+            result.config_file = args[i];
         } else if (!std.mem.startsWith(u8, arg, "-")) {
             result.fn_name = arg;
         }

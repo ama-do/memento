@@ -28,10 +28,22 @@ pub const Shell = enum {
 };
 
 /// Detect the current shell from the environment.
-/// On Windows, SHELL is not set; PowerShell is detected via PSModulePath.
+///
+/// On Windows, SHELL is only set by POSIX-emulation layers (Git Bash, MSYS2,
+/// Cygwin). We check it first so that Git Bash is correctly detected as bash
+/// rather than being confused with PowerShell.  PSModulePath is a system-wide
+/// env var present on most Windows machines, including inside Git Bash — it
+/// must not be used as the sole PowerShell signal.
+///
 /// Returns null if no known shell is detected.
 pub fn detectShell(environ_map: *const std.process.Environ.Map) ?Shell {
     if (builtin.os.tag == .windows) {
+        // Git Bash / MSYS2 / Cygwin always set SHELL; prefer it.
+        if (environ_map.get("SHELL")) |shell_var| {
+            const basename = std.fs.path.basename(shell_var);
+            if (Shell.fromStr(basename)) |sh| return sh;
+        }
+        // Pure PowerShell sessions do not set SHELL but do set PSModulePath.
         if (environ_map.get("PSModulePath") != null) return .powershell;
         return null;
     }
@@ -93,11 +105,20 @@ pub fn fishWrapperPath(gpa: std.mem.Allocator, home: []const u8, fn_name: []cons
 }
 
 /// Returns the rc file path relative to HOME for bash/zsh/powershell.
+/// Uses forward slashes throughout — Windows accepts them and they round-trip
+/// correctly through std.fs.path.join on all targets.
 pub fn rcFileRel(shell: Shell) []const u8 {
     return switch (shell) {
         .bash => ".bashrc",
         .zsh => ".zshrc",
-        .powershell => ".config/powershell/Microsoft.PowerShell_profile.ps1",
+        // Windows PowerShell 7+ profile lives under Documents/PowerShell.
+        // Windows PowerShell 5 uses Documents/WindowsPowerShell — users on
+        // PS5 should pass --config-file with the exact path.
+        // On macOS/Linux, PowerShell Core uses ~/.config/powershell.
+        .powershell => if (builtin.os.tag == .windows)
+            "Documents/PowerShell/Microsoft.PowerShell_profile.ps1"
+        else
+            ".config/powershell/Microsoft.PowerShell_profile.ps1",
         .fish => unreachable, // fish uses a separate file
     };
 }
@@ -122,6 +143,11 @@ pub fn historyFilePath(
             break :blk try std.fs.path.join(gpa, &.{ home, ".zsh_history" });
         },
         .fish => try std.fs.path.join(gpa, &.{ home, ".local", "share", "fish", "fish_history" }),
-        .powershell => null, // PSReadLine path varies; skip for now
+        // PSReadLine history: %APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+        // On Windows APPDATA is always set; fall back to null on other platforms.
+        .powershell => if (environ_map.get("APPDATA")) |appdata|
+            try std.fs.path.join(gpa, &.{ appdata, "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt" })
+        else
+            null,
     };
 }

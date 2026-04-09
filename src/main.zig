@@ -718,7 +718,7 @@ fn printHelp(io: std.Io) void {
 fn printVersion(io: std.Io) void {
     var buf: [64]u8 = undefined;
     var w = std.Io.File.stderr().writer(io, &buf);
-    w.interface.print("memento 0.1.0\n", .{}) catch {};
+    w.interface.print("memento {s}\n", .{build_options.version}) catch {};
     w.flush() catch {};
 }
 

@@ -30,6 +30,8 @@ pub fn build(b: *std.Build) void {
     const is_debug = optimize == .Debug;
     const build_opts = b.addOptions();
     build_opts.addOption(bool, "enable_mm_db_override", is_debug);
+    // Keep this in sync with the version field in build.zig.zon.
+    build_opts.addOption([]const u8, "version", "0.1.0");
     exe_mod.addOptions("build_options", build_opts);
 
     const exe = b.addExecutable(.{
@@ -106,6 +108,50 @@ pub fn build(b: *std.Build) void {
 
         const run_t = b.addRunArtifact(t);
         test_step.dependOn(&run_t.step);
+    }
+
+    // ── Fuzz tests ───────────────────────────────────────────────────────────
+    //
+    // Seed / regression run (completes):     zig build fuzz
+    // Continuous fuzzing (runs until crash):  zig build fuzz -- --fuzz
+    // Replay a specific crash file:           zig build fuzz -- path/to/crash
+    //
+    // Source modules are registered by name so fuzz_test.zig can @import
+    // them without crossing module-root boundaries.
+    {
+        const fuzz_step = b.step("fuzz", "Run fuzz tests (append -- --fuzz for continuous mode)");
+
+        // Each module's root file brings its sibling @imports along
+        // automatically (they resolve relative to the source file location).
+        const cli_mod = b.createModule(.{
+            .root_source_file = b.path("src/cli.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const template_mod = b.createModule(.{
+            .root_source_file = b.path("src/core/template.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const history_mod = b.createModule(.{
+            .root_source_file = b.path("src/core/history.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+
+        const fuzz_mod = b.createModule(.{
+            .root_source_file = b.path("tests/fuzz_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        fuzz_mod.addImport("cli",      cli_mod);
+        fuzz_mod.addImport("template", template_mod);
+        fuzz_mod.addImport("history",  history_mod);
+
+        const fuzz_t = b.addTest(.{ .root_module = fuzz_mod });
+        const run_fuzz = b.addRunArtifact(fuzz_t);
+        if (b.args) |args| run_fuzz.addArgs(args);
+        fuzz_step.dependOn(&run_fuzz.step);
     }
 
     // TUI tests require libc for PTY operations (fork, execve, grantpt, etc.)
